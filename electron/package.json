@@ -1,0 +1,51 @@
+{
+  "name": "paperforge",
+  "version": "1.0.0",
+  "description": "PaperForge — Universal Agentic Research-to-Journal Converter",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder",
+    "build-win": "electron-builder --win",
+    "build-mac": "electron-builder --mac",
+    "build-linux": "electron-builder --linux"
+  },
+  "build": {
+    "appId": "com.paperforge.app",
+    "productName": "PaperForge",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "**/*",
+      "../web/frontend/dist/**/*",
+      "../pipeline/**/*",
+      "../src/**/*",
+      "../filters/**/*",
+      "../templates/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "../pipeline",
+        "to": "pipeline"
+      },
+      {
+        "from": "../src",
+        "to": "src"
+      },
+      {
+        "from": "../filters",
+        "to": "filters"
+      },
+      {
+        "from": "../templates",
+        "to": "templates"
+      }
+    ]
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "electron": "^28.0.0",
+    "electron-builder": "^24.9.0"
+  }
+}

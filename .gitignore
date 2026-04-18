@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/PaperForge/
+build/*.spec.bak
+node_modules/
+.venv/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+output/
+checkpoints/
+.DS_Store
+*.log
