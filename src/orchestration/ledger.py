@@ -1,6 +1,13 @@
 """
 PaperForge — SQLite Progress Ledger
 Tracks file processing state for session resumption.
+
+Schema per spec:
+  progress: file_id TEXT, step TEXT, last_row INTEGER, ts TIMESTAMP
+  runs:     run_id → journal, format, status, summary
+  checkpoints: run_id, step, state_json (also written to filesystem)
+
+All writes use SQLite WAL mode for concurrent access safety.
 """
 import sqlite3
 import datetime
@@ -12,12 +19,19 @@ DB_PATH = pathlib.Path(__file__).parent.parent.parent / "ledger.sqlite"
 
 
 def get_connection(db_path: Optional[pathlib.Path] = None) -> sqlite3.Connection:
+    """Create WAL-mode autocommit connection with busy-timeout."""
     path = db_path or DB_PATH
     path.parent.mkdir(parents=True, exist_ok=True)
     con = sqlite3.connect(str(path), isolation_level=None)  # autocommit
     con.execute("PRAGMA journal_mode=WAL;")
     con.execute("PRAGMA synchronous=NORMAL;")
     con.execute("PRAGMA busy_timeout=5000;")
+    _ensure_tables(con)
+    return con
+
+
+def _ensure_tables(con: sqlite3.Connection) -> None:
+    """Create tables if they don't exist (idempotent)."""
     con.execute("""
         CREATE TABLE IF NOT EXISTS progress (
             run_id    TEXT,
@@ -51,7 +65,15 @@ def get_connection(db_path: Optional[pathlib.Path] = None) -> sqlite3.Connection
             ts            TEXT
         );
     """)
-    return con
+    # Index for fast resume queries
+    con.execute("""
+        CREATE INDEX IF NOT EXISTS idx_progress_run
+        ON progress(run_id, file_id, status);
+    """)
+    con.execute("""
+        CREATE INDEX IF NOT EXISTS idx_checkpoints_run
+        ON checkpoints(run_id, checkpoint_id DESC);
+    """)
 
 
 class Ledger:
@@ -134,14 +156,40 @@ class Ledger:
             (run_id, file_id, step))
         return cur.fetchone() is not None
 
-    # ── Checkpointing ───────────────────────────────────────────────
+    # ── Checkpointing (SQLite + filesystem) ─────────────────────────
 
-    def save_checkpoint(self, run_id: str, step: str, state: dict) -> int:
+    def save_checkpoint(self, run_id: str, step: str, state: dict,
+                        checkpoint_dir: Optional[pathlib.Path] = None) -> int:
+        """
+        Save checkpoint to both SQLite and filesystem.
+        The filesystem copy enables manual inspection and fastio upload.
+        """
         ts = datetime.datetime.now(datetime.UTC).isoformat()
+        state_json = json.dumps(state, default=str)
+
+        # SQLite
         cur = self.con.execute(
             "INSERT INTO checkpoints (run_id,step,state_json,ts) VALUES (?,?,?,?)",
-            (run_id, step, json.dumps(state), ts))
-        return cur.lastrowid
+            (run_id, step, state_json, ts))
+        checkpoint_id = cur.lastrowid
+
+        # Filesystem: checkpoints/<run_id>/<step>.json
+        if checkpoint_dir is None:
+            checkpoint_dir = pathlib.Path("checkpoints")
+        fs_path = checkpoint_dir / run_id / f"{step}.json"
+        fs_path.parent.mkdir(parents=True, exist_ok=True)
+        fs_path.write_text(state_json)
+
+        # Also write a latest.json for quick resume
+        latest_path = checkpoint_dir / run_id / "latest.json"
+        latest_path.write_text(json.dumps({
+            "checkpoint_id": checkpoint_id,
+            "step": step,
+            "state": state,
+            "ts": ts,
+        }, indent=2, default=str))
+
+        return checkpoint_id
 
     def load_checkpoint(self, checkpoint_id: int) -> Optional[Dict]:
         cur = self.con.execute(
@@ -180,6 +228,14 @@ class Ledger:
             (run_id, file_id))
         row = cur.fetchone()
         return row[0] if row else None
+
+    def get_last_row(self, run_id: str, file_id: str, step: str) -> Optional[int]:
+        """Get the last processed row for incremental resume."""
+        cur = self.con.execute(
+            "SELECT last_row FROM progress WHERE run_id=? AND file_id=? AND step=?",
+            (run_id, file_id, step))
+        row = cur.fetchone()
+        return row[0] if row and row[0] is not None else None
 
     def close(self):
         self.con.close()

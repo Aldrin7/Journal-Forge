@@ -161,8 +161,9 @@ def run_pipeline(
                     ast_path.write_text(doc.pandoc_json)
                     ingest_state["ast_path"] = str(ast_path)
 
-                # Save checkpoint
-                ledger.save_checkpoint(run_id, "ingest", ingest_state)
+                # Save checkpoint (SQLite + filesystem: checkpoints/<run_id>/ingest.json)
+                ledger.save_checkpoint(run_id, "ingest", ingest_state,
+                                      checkpoint_dir=out_dir.parent)
                 ledger.log_step(run_id, file_id, "ingest", "completed",
                                metadata=ingest_state)
 
@@ -171,6 +172,7 @@ def run_pipeline(
                 figures_processed=len(doc.figures),
                 tables_processed=len(doc.tables),
             )
+            heartbeat.add_file(input_file, "ingest", "completed")
             heartbeat.complete_step("ingest")
 
             if not quiet:
@@ -216,17 +218,19 @@ def run_pipeline(
                 with open(style_path, 'w') as f:
                     json.dump(transform_result.style_map, f, indent=2)
 
-                # Save checkpoint
+                # Save checkpoint (SQLite + filesystem)
                 transform_state = {
                     "num_equations": len(transform_result.normalized_equations),
                     "applied_filters": transform_result.applied_filters,
                     "warnings": transform_result.warnings,
                     "style_map_path": str(style_path),
                 }
-                ledger.save_checkpoint(run_id, "transform", transform_state)
+                ledger.save_checkpoint(run_id, "transform", transform_state,
+                                      checkpoint_dir=out_dir.parent)
                 ledger.log_step(run_id, file_id, "transform", "completed",
                                metadata=transform_state)
 
+            heartbeat.add_file(str(ast_out_path), "transform", "completed")
             heartbeat.complete_step("transform")
 
             if not quiet:
@@ -269,11 +273,13 @@ def run_pipeline(
                         jats_result = validate_jats(str(jats_path))
                         mg.checkpoint("jats_audit")
 
-                ledger.save_checkpoint(run_id, "audit", report)
+                ledger.save_checkpoint(run_id, "audit", report,
+                                      checkpoint_dir=out_dir.parent)
                 ledger.log_step(run_id, file_id, "audit", "completed",
                                metadata={"score": report["score"]})
 
             result["audit"] = report
+            heartbeat.add_file(str(audit_path), "audit", "completed")
             heartbeat.complete_step("audit")
 
             if not quiet:
@@ -322,7 +328,7 @@ def run_pipeline(
                     "success": export_result.success,
                     "output_path": export_result.output_path,
                     "size_bytes": export_result.size_bytes,
-                })
+                }, checkpoint_dir=out_dir.parent)
                 ledger.log_step(run_id, file_id, "render", "completed",
                                metadata={"success": export_result.success})
 
@@ -390,7 +396,8 @@ def run_pipeline(
 
                 mg.checkpoint("finalize_complete")
 
-                ledger.save_checkpoint(run_id, "finalize", manifest)
+                ledger.save_checkpoint(run_id, "finalize", manifest,
+                                      checkpoint_dir=out_dir.parent)
                 ledger.log_step(run_id, file_id, "finalize", "completed")
 
             heartbeat.complete_step("finalize")

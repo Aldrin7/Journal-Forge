@@ -1,6 +1,13 @@
 """
 PaperForge — Session Heartbeat
-Generates structured session summaries at 85% of wall-time limit.
+Generates a Session Summary at 85% of the wall-time limit (~40 min).
+
+Writes summary_{{run_id}}.json containing:
+  - processed file list
+  - metrics (pages, equations, tables, figures)
+  - blockers
+  - next step
+
 Enables exact context recovery across ephemeral sessions.
 """
 import time
@@ -13,8 +20,8 @@ from typing import Optional, List, Dict, Any
 
 class SessionHeartbeat:
     """
-    Monitors session wall-time and generates a structured summary
-    at 85% of the limit, ensuring the agent can resume context on reboot.
+    Monitors session wall-time and fires a structured summary at 85%.
+    The summary JSON is the single artifact the agent needs to resume.
     """
 
     def __init__(self, run_id: str, max_minutes: int = 45,
@@ -28,7 +35,10 @@ class SessionHeartbeat:
         self.summary_path = self.checkpoint_dir / f"summary_{run_id}.json"
         self.summary_md_path = self.checkpoint_dir / f"summary_{run_id}.md"
 
-        # Mutable state updated by the pipeline
+        # ── Processed file list ─────────────────────────────────────
+        self.processed_files: List[Dict[str, Any]] = []
+
+        # ── Metrics ─────────────────────────────────────────────────
         self.metrics: Dict[str, Any] = {
             "pages_rendered": 0,
             "equations_extracted": 0,
@@ -37,6 +47,8 @@ class SessionHeartbeat:
             "citations_resolved": 0,
             "bytes_written": 0,
         }
+
+        # ── Pipeline state ──────────────────────────────────────────
         self.blockers: List[str] = []
         self.warnings: List[str] = []
         self.completed_steps: List[str] = []
@@ -50,19 +62,19 @@ class SessionHeartbeat:
         self._triggered = False
 
     def start(self) -> None:
-        """Start the heartbeat timer."""
+        """Start the 85%-wall-time timer."""
         delay = max(0, self.deadline - time.time())
         self._timer = threading.Timer(delay, self._write_summary)
         self._timer.daemon = True
         self._timer.start()
 
     def stop(self) -> None:
-        """Stop the heartbeat timer."""
+        """Stop the timer (pipeline finished before deadline)."""
         if self._timer:
             self._timer.cancel()
 
     def update(self, **kwargs) -> None:
-        """Update pipeline state metrics."""
+        """Update pipeline state metrics and metadata."""
         for k, v in kwargs.items():
             if k in self.metrics:
                 self.metrics[k] = v
@@ -87,14 +99,32 @@ class SessionHeartbeat:
         if step not in self.completed_steps:
             self.completed_steps.append(step)
 
+    def add_file(self, path: str, step: str, status: str = "processed",
+                 rows: Optional[int] = None) -> None:
+        """Track a processed file for the session summary."""
+        self.processed_files.append({
+            "path": path,
+            "step": step,
+            "status": status,
+            "rows": rows,
+        })
+
     def _write_summary(self) -> None:
-        """Generate both JSON and Markdown summaries."""
+        """Generate both JSON and Markdown summaries at 85% wall-time."""
         if self._triggered:
             return
         self._triggered = True
 
         elapsed = time.time() - self.start_time
         remaining = max(0, self.max_minutes * 60 - elapsed)
+
+        # Infer next step from pipeline order
+        PIPELINE_ORDER = ["ingest", "transform", "audit", "render", "finalize"]
+        inferred_next = "unknown"
+        for step in PIPELINE_ORDER:
+            if step not in self.completed_steps:
+                inferred_next = step
+                break
 
         summary = {
             "run_id": self.run_id,
@@ -104,15 +134,16 @@ class SessionHeartbeat:
             "journal": self.journal,
             "input_file": self.input_file,
             "output_format": self.output_format,
+            "processed_files": self.processed_files,
             "metrics": self.metrics,
             "completed_steps": self.completed_steps,
             "current_step": self.current_step,
-            "next_step": self.next_step or "unknown",
+            "next_step": self.next_step or inferred_next,
             "blockers": self.blockers,
             "warnings": self.warnings,
         }
 
-        # Write JSON
+        # Write JSON (machine-readable resume artifact)
         self.summary_path.write_text(json.dumps(summary, indent=2))
 
         # Write Markdown (human-readable)
@@ -121,6 +152,7 @@ class SessionHeartbeat:
 
         print(f"[heartbeat] Summary written → {self.summary_path}")
         print(f"[heartbeat] Remaining time: {remaining / 60:.1f} min")
+        print(f"[heartbeat] Resume at step: {summary['next_step']}")
 
     def _to_markdown(self, s: dict) -> str:
         lines = [
@@ -128,7 +160,7 @@ class SessionHeartbeat:
             f"**Generated:** {s['timestamp']}",
             f"**Elapsed:** {s['elapsed_minutes']} min | **Remaining:** {s['remaining_minutes']} min",
             "",
-            f"## Pipeline State",
+            "## Pipeline State",
             f"- **Journal:** {s['journal'] or 'N/A'}",
             f"- **Input:** {s['input_file'] or 'N/A'}",
             f"- **Output Format:** {s['output_format'] or 'N/A'}",
@@ -139,6 +171,12 @@ class SessionHeartbeat:
         ]
         for k, v in s["metrics"].items():
             lines.append(f"- **{k}:** {v}")
+
+        if s.get("processed_files"):
+            lines.append("\n## Processed Files")
+            for f in s["processed_files"]:
+                rows_str = f" ({f['rows']} rows)" if f.get("rows") else ""
+                lines.append(f"- `{f['path']}` — {f['step']}{rows_str}")
 
         lines.append("\n## Completed Steps")
         for step in s["completed_steps"]:
@@ -155,7 +193,10 @@ class SessionHeartbeat:
                 lines.append(f"- {w}")
 
         lines.append("\n## Resume Instructions")
-        lines.append(f"Run `python3 pipeline/translator.py --resume {s['run_id']}` to continue from step: **{s['next_step']}**")
+        lines.append(
+            f"Run `python3 pipeline/translator.py --resume {s['run_id']}` "
+            f"to continue from step: **{s['next_step']}**"
+        )
 
         return "\n".join(lines)
 
@@ -166,3 +207,7 @@ class SessionHeartbeat:
     def is_critical(self) -> bool:
         """True if less than 15% time remaining."""
         return self.get_time_remaining() < self.max_minutes * 60 * 0.15
+
+    def get_elapsed_minutes(self) -> float:
+        """Return elapsed minutes since start."""
+        return (time.time() - self.start_time) / 60
