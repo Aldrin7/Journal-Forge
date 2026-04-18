@@ -51,7 +51,7 @@ def export_document(ast_json: str, output_path: str, fmt: str,
     elif fmt == "jats":
         cmd.extend(["--standalone"])
     elif fmt == "html":
-        cmd.extend(["--standalone", "--self-contained"])
+        cmd.extend(["--standalone", "--embed-resources"])
     elif fmt == "epub":
         cmd.extend(["--standalone"])
 

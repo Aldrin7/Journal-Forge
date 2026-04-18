@@ -13,16 +13,16 @@
   - Output: PDF, DOCX, LaTeX, JATS XML, PMC XML, HTML, ePub
 
 - **Mathematical Fidelity:**
-  - Equations, formulas, tables, figures, symbols all convert correctly
+  - Pure-Python OMML→LaTeX converter (no external deps)
+  - Fractions, superscripts, subscripts, radicals, integrals, matrices, accents
   - OMML ↔ LaTeX lossless round-tripping
-  - Complex multi-line derivations preserved
 
-- **40+ Journal Templates:**
+- **44+ Journal Templates:**
   - IEEE (all transactions), Springer Nature, Wiley, Elsevier, MDPI, Nature, ACM, PLOS, Frontiers, BMJ, ACS, Taylor & Francis, Oxford
   - Each template includes style maps, Lua filters, and verification tests
 
 - **Robust Auditing:**
-  - Semantic audit (citations, metadata, structure)
+  - Semantic audit (citations, metadata, structure, math, figures)
   - Visual SSIM regression (pixel-level PDF comparison)
   - JATS PMC compliance (22-rule validation)
   - Automatic "Verify and Correct" loops
@@ -34,25 +34,58 @@
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────┐
-│           PaperForge Orchestrator                    │
-│  Session Manager · MemoryGuard · Checkpoint Resume   │
-├──────────┬──────────┬──────────┬────────────────────┤
-│  SQLite  │Ingestion │ Transform│ Auditing + Export   │
-│  Ledger  │Pipeline  │ Engine   │ Semantic/Visual/JATS│
-└──────────┴──────────┴──────────┴────────────────────┘
++--------------------------------------------------------------+
+| MiMo-Claw Orchestrator (MiMo-V2-Pro)                         |
+| • Session manager — enforces 45-min wall-time                |
+| • MemoryGuard — sub-process isolation & gc.collect()         |
++---------------------------+----------------------------------+
+                            |
+                            | (SQLite ledger + JSON checkpoints)
++---------------------------v----------------------------------+
+| Persistence Layer                                             |
+| • ledger.sqlite — file_id, step, last_row, timestamps        |
+| • checkpoints/ — agent_state.json, AST*.json, logs           |
++---------------------------+----------------------------------+
+                            |
+         +----------------+------------------+-------------------+
+         |                |                  |                   |
++--------v-----+  +------v------+  +-------v------+  +--------v--------+
+| Ingestion    |  | Transform   |  | Auditing     |  | Packaging       |
+| (docx, md,   |  | (Pandoc AST |  | (semantic +  |  | (PyInstaller    |
+|  tex, jats)  |  | + Lua filt.)|  | visual diff) |  |  / Electron)    |
++--------------+  +-------------+  +--------------+  +-----------------+
 ```
+
+## Technical Stack
+
+| Layer | Technology |
+|-------|-----------|
+| Core | Python 3.12 |
+| Document conversion | Pandoc ≥ 3.3 (subprocess) |
+| LaTeX engine | Tectonic (on-demand packages) |
+| Math handling | Pure-Python OMML→LaTeX + Pandoc AST |
+| Visual regression | pdf-visual-diff (Node.js) or Python SSIM |
+| Citations | CSL engine (14 bundled styles) |
+| State | SQLite WAL-mode |
+| Packaging | PyInstaller (directory mode) |
+| Desktop UI | Electron + React |
+| Web UI | FastAPI + React + Vite |
+
+All binaries bundled — works on a completely isolated machine.
 
 ## Quick Start
 
 ```bash
+# Install dependencies
+pip install -r requirements.txt
+
 # Convert a paper
 python3 pipeline/translator.py paper.md --journal ieee --format docx
 python3 pipeline/translator.py thesis.tex --journal springer
-python3 pipeline/translator.py draft.docx --journal acm
+python3 pipeline/translator.py draft.docx --journal acm --format pdf
 
-# Universal template mode
-python3 pipeline/translator.py --template --journal wiley --format pdf
+# List available journals
+python3 pipeline/translator.py --list-journals
 
 # Desktop app
 cd electron && npm start
@@ -64,8 +97,8 @@ cd web/frontend && npm run dev
 
 ## Constraints
 
-- 3 GB RAM ceiling
-- 45-minute ephemeral sessions
+- ≤ 3 GB RAM ceiling
+- 45–50 min ephemeral sessions
 - Fully offline (all binaries bundled)
 - SQLite WAL-mode checkpointing for session resumption
 
@@ -74,20 +107,34 @@ cd web/frontend && npm run dev
 ```
 PaperForge/
 ├── src/
-│   ├── ingestion/       # DOCX, LaTeX, MD, JATS parsers
+│   ├── ingestion/       # DOCX, LaTeX, MD, JATS parsers + OMML converter
 │   ├── transformation/  # AST normalization, Lua filters, style maps
-│   ├── auditing/        # Semantic, visual, JATS compliance
+│   ├── auditing/        # Semantic, visual SSIM, JATS compliance
 │   ├── orchestration/   # Ledger, heartbeat, memory guard
-│   ├── export/          # PDF, DOCX, LaTeX, JATS renderers
-│   └── ui/              # Shared UI components
-├── filters/             # Pandoc Lua filters
-├── scripts/             # Visual diff, template download
-├── templates/           # 40+ journal style maps
+│   ├── export/          # PDF, DOCX, LaTeX, JATS renderers + Tectonic
+│   └── templates/       # Journal template manager
+├── filters/             # Pandoc Lua filters (IEEE, Springer, Nature, etc.)
+├── data/csl-styles/     # 14 CSL citation style files
+├── scripts/             # Visual diff (Node.js)
 ├── web/                 # FastAPI backend + React frontend
 ├── electron/            # Desktop app wrapper
-├── pipeline/            # Main orchestrator
-├── tests/               # Verification tests
-└── data/                # CSL styles, template cache
+├── pipeline/            # Main orchestrator (CLI)
+├── tests/               # Verification, OMML, and E2E tests
+├── build/               # PyInstaller spec
+└── requirements.txt     # Python dependencies
+```
+
+## Testing
+
+```bash
+# Core verification (11 tests)
+python3 tests/test_verify.py
+
+# OMML → LaTeX conversion (10 tests)
+python3 tests/test_omml.py
+
+# End-to-end pipeline (20+ tests)
+python3 tests/test_e2e.py
 ```
 
 ## License

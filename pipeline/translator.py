@@ -473,7 +473,7 @@ def _build_ast_from_doc(doc: UnifiedDocument) -> str:
     for eq in doc.equations:
         blocks.append({
             "t": "Math",
-            "c": ["DisplayMath", eq]
+            "c": [{"t": "DisplayMath"}, eq]
         })
 
     # Metadata

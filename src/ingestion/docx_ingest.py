@@ -58,11 +58,14 @@ def ingest_docx(file_path: str) -> DocxDocument:
         # Extract core properties
         try:
             props = word_doc.core_properties
-            doc.title = props.title or path.stem
+            doc.title = props.title or ""
             if props.author:
-                doc.authors = [a.strip() for a in props.author.split(";")]
+                doc.authors = [a.strip() for a in props.author.split(";") if a.strip()]
         except Exception:
-            doc.title = path.stem
+            pass
+
+        # If no title in properties, look for Heading 1 or largest heading
+        found_title_in_heading = False
 
         # Parse paragraphs
         for para in word_doc.paragraphs:
@@ -74,12 +77,21 @@ def ingest_docx(file_path: str) -> DocxDocument:
 
             # Detect headings by style name
             style_name = para.style.name.lower() if para.style else ""
-            if "heading" in style_name:
+            is_heading = "heading" in style_name or "title" == style_name
+            if is_heading:
                 try:
-                    elem.level = int(style_name[-1])
+                    # "Title" style = level 0, "Heading N" = level N
+                    if "title" == style_name:
+                        elem.level = 0
+                    else:
+                        elem.level = int(style_name[-1])
                 except (ValueError, IndexError):
                     elem.level = 1
                 elem.type = "heading"
+                # Use Title style or heading 1 as title if no core_properties title
+                if elem.level <= 1 and para.text.strip() and not doc.title and not found_title_in_heading:
+                    doc.title = para.text.strip()
+                    found_title_in_heading = True
 
             # Detect equations (OMML)
             omml_runs = para._element.findall(
@@ -149,22 +161,25 @@ def ingest_docx(file_path: str) -> DocxDocument:
     except Exception:
         pass
 
+    # Fallback: use filename as title if nothing extracted
+    if not doc.title:
+        doc.title = path.stem
+
     return doc
 
 
 def _omml_to_latex(omml_element) -> Optional[str]:
     """
     Convert Office Math Markup Language (OMML) to LaTeX.
-    Uses python-docx's built-in conversion or falls back to regex extraction.
+    Primary: pure-Python OMML parser.
+    Fallback: regex extraction.
     """
     try:
-        # Try using the docxlatex library
-        from docxlatex import Document as DocxLatexDoc
-        import io
-        # This is a simplified approach; in production we'd serialize the element
-        # and extract just the math
-        return None
-    except ImportError:
+        from .omml_to_latex import omml_to_latex
+        latex = omml_to_latex(omml_element)
+        if latex and len(latex) > 1:
+            return latex
+    except Exception:
         pass
 
     # Fallback: extract text content from OMML
