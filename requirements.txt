@@ -1,0 +1,25 @@
+# PaperForge — Dependencies
+# Core
+pandoc>=3.0
+python-docx>=1.0
+lxml>=4.9
+psutil>=5.9
+PyYAML>=6.0
+
+# Web API
+fastapi>=0.100
+uvicorn>=0.20
+python-multipart>=0.0.6
+pydantic>=2.0
+
+# Optional: Enhanced math conversion
+# docxlatex>=0.2
+# docal>=0.1
+
+# Optional: Visual diff
+# Pillow>=10.0
+# scikit-image>=0.20
+
+# Build
+# pyinstaller>=5.0
+# nuitka>=1.0

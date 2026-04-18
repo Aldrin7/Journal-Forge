@@ -62,7 +62,7 @@ def export_document(ast_json: str, output_path: str, fmt: str,
             cmd.append(f"--csl={csl_path}")
     else:
         # Try default CSL
-        csl_dir = pathlib.Path(__file__).parent.parent / "data" / "csl-styles"
+        csl_dir = pathlib.Path(__file__).parent.parent.parent / "data" / "csl-styles"
         if csl_dir.exists():
             csl_default = csl_dir / "ieee.csl"
             if csl_default.exists():

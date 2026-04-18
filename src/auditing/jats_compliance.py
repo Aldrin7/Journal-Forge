@@ -10,7 +10,7 @@ from typing import Dict, Any, Optional, List, Tuple
 RULES = [
     # Required elements
     ("article_type",
-     lambda e: _find(e, ".//article-type") is not None,
+     lambda e: e.get("article-type") is not None or _find(e, ".//article-type") is not None,
      "Missing <article-type>", "error"),
 
     ("front_element",

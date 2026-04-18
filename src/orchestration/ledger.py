@@ -64,20 +64,20 @@ class Ledger:
 
     def create_run(self, run_id: str, file_id: str, journal: str,
                    fmt: str) -> None:
-        ts = datetime.datetime.utcnow().isoformat()
+        ts = datetime.datetime.now(datetime.UTC).isoformat()
         self.con.execute(
             "INSERT OR REPLACE INTO runs (run_id,file_id,journal,format,started,status) "
             "VALUES (?,?,?,?,?,?)",
             (run_id, file_id, journal, fmt, ts, "running"))
 
     def complete_run(self, run_id: str, summary: Optional[str] = None) -> None:
-        ts = datetime.datetime.utcnow().isoformat()
+        ts = datetime.datetime.now(datetime.UTC).isoformat()
         self.con.execute(
             "UPDATE runs SET completed=?, status='completed', summary=? WHERE run_id=?",
             (ts, summary, run_id))
 
     def fail_run(self, run_id: str, error: str) -> None:
-        ts = datetime.datetime.utcnow().isoformat()
+        ts = datetime.datetime.now(datetime.UTC).isoformat()
         self.con.execute(
             "UPDATE runs SET completed=?, status='failed', summary=? WHERE run_id=?",
             (ts, error, run_id))
@@ -88,7 +88,7 @@ class Ledger:
                  status: str = "completed",
                  last_row: Optional[int] = None,
                  metadata: Optional[dict] = None) -> None:
-        ts = datetime.datetime.utcnow().isoformat()
+        ts = datetime.datetime.now(datetime.UTC).isoformat()
         meta_json = json.dumps(metadata) if metadata else None
         self.con.execute(
             "INSERT OR REPLACE INTO progress "
@@ -137,7 +137,7 @@ class Ledger:
     # ── Checkpointing ───────────────────────────────────────────────
 
     def save_checkpoint(self, run_id: str, step: str, state: dict) -> int:
-        ts = datetime.datetime.utcnow().isoformat()
+        ts = datetime.datetime.now(datetime.UTC).isoformat()
         cur = self.con.execute(
             "INSERT INTO checkpoints (run_id,step,state_json,ts) VALUES (?,?,?,?)",
             (run_id, step, json.dumps(state), ts))

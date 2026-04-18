@@ -166,13 +166,29 @@ def _inline_to_text(inline: dict) -> str:
     if t == "Math":
         c = inline.get("c", ["", ""])
         if isinstance(c, list) and len(c) >= 2:
-            doc_equations = c[1]
+            return c[1]
+        return ""
+    if t == "Code":
+        c = inline.get("c", [["", []], ""])
+        if isinstance(c, list) and len(c) >= 2:
+            return c[1]
+        return ""
     if t == "Emph" or t == "Strong":
         return "".join(_inline_to_text(i) for i in inline.get("c", []))
     if t == "Link":
         return "".join(_inline_to_text(i) for i in inline.get("c", [[], []])[0])
     if t == "Image":
         return "".join(_inline_to_text(i) for i in inline.get("c", [[], []])[0])
+    if t == "Quoted":
+        c = inline.get("c", [None, []])
+        if isinstance(c, list) and len(c) >= 2:
+            return '"' + "".join(_inline_to_text(i) for i in c[1]) + '"'
+        return ""
+    if t == "Cite":
+        c = inline.get("c", [[], []])
+        if isinstance(c, list) and len(c) >= 2:
+            return "".join(_inline_to_text(i) for i in c[1])
+        return ""
     return ""
 
 
@@ -236,6 +252,36 @@ def _walk_md_blocks(doc: MarkdownDocument, blocks: list) -> None:
                 "type": "code_block",
                 "text": code_text
             })
+
+        elif t == "Figure":
+            # Pandoc 3.x wraps standalone images in Figure blocks
+            c = block.get("c", [])
+            caption = ""
+            if len(c) >= 2 and isinstance(c[1], list):
+                # Caption is in c[1]
+                for item in c[1]:
+                    if isinstance(item, dict):
+                        caption += _inline_to_text(item)
+            # Content is in c[2] — walk for Image elements
+            if len(c) >= 3 and isinstance(c[2], list):
+                for content_block in c[2]:
+                    if isinstance(content_block, dict):
+                        for inline in content_block.get("c", []):
+                            if isinstance(inline, dict) and inline.get("t") == "Image":
+                                img_c = inline.get("c", [[], []])
+                                url = img_c[2][0] if len(img_c) >= 3 and img_c[2] else ""
+                                img_caption = caption or "".join(
+                                    _inline_to_text(i) for i in (img_c[1] if len(img_c) >= 2 else [])
+                                )
+                                doc.figures.append({
+                                    "caption": img_caption,
+                                    "source": url
+                                })
+                                doc.elements.append({
+                                    "type": "figure",
+                                    "caption": img_caption,
+                                    "source": url
+                                })
 
         elif t == "Table":
             table_caption = ""

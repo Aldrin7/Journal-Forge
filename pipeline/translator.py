@@ -28,6 +28,12 @@ from src.auditing.semantic import full_audit, audit_report
 from src.auditing.jats_compliance import validate_jats
 from src.export.exporter import export_document, export_all_formats, ExportResult
 
+try:
+    from src.auditing.visual_diff import visual_diff, visual_audit_report
+    VISUAL_DIFF_AVAILABLE = True
+except ImportError:
+    VISUAL_DIFF_AVAILABLE = False
+
 
 PIPELINE_STEPS = [
     "ingest",
@@ -40,7 +46,7 @@ PIPELINE_STEPS = [
 
 def generate_run_id() -> str:
     """Generate a unique run ID."""
-    ts = datetime.datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+    ts = datetime.datetime.now(datetime.UTC).strftime("%Y%m%d-%H%M%S")
     short_uuid = uuid.uuid4().hex[:8]
     return f"{ts}-{short_uuid}"
 
@@ -374,7 +380,7 @@ def run_pipeline(
                     "output_format": output_format,
                     "outputs": result["outputs"],
                     "audit_score": result.get("audit", {}).get("score", 0),
-                    "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+                    "timestamp": datetime.datetime.now(datetime.UTC).isoformat() + "Z",
                     "title": doc.title,
                     "authors": doc.authors,
                 }

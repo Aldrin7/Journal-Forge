@@ -98,7 +98,7 @@ class SessionHeartbeat:
 
         summary = {
             "run_id": self.run_id,
-            "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+            "timestamp": datetime.datetime.now(datetime.UTC).isoformat() + "Z",
             "elapsed_minutes": round(elapsed / 60, 1),
             "remaining_minutes": round(remaining / 60, 1),
             "journal": self.journal,
